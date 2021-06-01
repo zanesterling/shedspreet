@@ -96,8 +96,8 @@ struct CellRef {
 }
 
 impl CellRef {
-    fn of(x: usize, y: usize) {
-        CellRef { x: x, y: y };
+    fn of(x: usize, y: usize) -> CellRef {
+        CellRef { x: x, y: y }
     }
 }
 
