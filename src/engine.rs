@@ -32,31 +32,36 @@ impl Spreadsheet {
         }
 
         if x >= self.arr_w || y >= self.arr_h {
-            let mut new_arr_w = self.arr_w;
-            let mut new_arr_h = self.arr_h;
-            while new_arr_w <= x {
-                new_arr_w *= 2;
-            }
-            while new_arr_h <= x {
-                new_arr_h *= 2;
-            }
-            let mut new_cells = Vec::with_capacity(new_arr_w * new_arr_h);
-            for yy in 0..self.arr_h {
-                for xx in 0..self.arr_w {
-                    new_cells.push(self.cells[xx + yy * self.arr_w].clone());
-                }
-                for _ in self.arr_w..new_arr_w {
-                    new_cells.push(empty_cell());
-                }
-            }
-            new_cells.resize(new_arr_w * new_arr_h, empty_cell());
-            self.cells = new_cells;
-            self.arr_w = new_arr_w;
-            self.arr_h = new_arr_h;
+            self.grow_array_to_fit(x, y)
         }
 
         let new_cell = &mut self.cells[x + y * self.arr_w];
         new_cell.contents = contents;
+    }
+
+    fn grow_array_to_fit(&mut self, x: usize, y: usize) {
+        let mut new_arr_w = self.arr_w;
+        let mut new_arr_h = self.arr_h;
+        while new_arr_w <= x {
+            new_arr_w *= 2;
+        }
+
+        while new_arr_h <= y {
+            new_arr_h *= 2;
+        }
+        let mut new_cells = Vec::with_capacity(new_arr_w * new_arr_h);
+        for yy in 0..self.arr_h {
+            for xx in 0..self.arr_w {
+                new_cells.push(self.cells[xx + yy * self.arr_w].clone());
+            }
+            for _ in self.arr_w..new_arr_w {
+                new_cells.push(empty_cell());
+            }
+        }
+        new_cells.resize(new_arr_w * new_arr_h, empty_cell());
+        self.cells = new_cells;
+        self.arr_w = new_arr_w;
+        self.arr_h = new_arr_h;
     }
 }
 
