@@ -1,3 +1,5 @@
+use std::cmp::max;
+
 pub struct Spreadsheet {
     // The maximum X and Y values of filled cells in the sheet.
     max_x: usize,
@@ -10,8 +12,18 @@ pub struct Spreadsheet {
 }
 
 impl Spreadsheet {
+    pub fn new() -> Spreadsheet {
+        Spreadsheet {
+            max_x: 0,
+            max_y: 0,
+            arr_w: 1,
+            arr_h: 1,
+            cells: vec![Cell::empty()],
+        }
+    }
+
     pub fn show_cell(&self, x: usize, y: usize) -> String {
-        let mut cell = &empty_cell();
+        let mut cell = &Cell::empty();
         if x < self.arr_w && y < self.arr_h {
             cell = &self.cells[x + y * self.arr_w]
         };
@@ -22,14 +34,9 @@ impl Spreadsheet {
         (self.max_x, self.max_y)
     }
 
-    // Extends the internal array if necessary and sets cell (x,y) to contents.
     pub fn set(&mut self, x: usize, y: usize, contents: String) {
-        if x > self.max_x {
-            self.max_x = x;
-        }
-        if y > self.max_y {
-            self.max_y = y;
-        }
+        self.max_x = max(x, self.max_x);
+        self.max_y = max(y, self.max_y);
 
         if x >= self.arr_w || y >= self.arr_h {
             self.grow_array_to_fit(x, y)
@@ -55,33 +62,44 @@ impl Spreadsheet {
                 new_cells.push(self.cells[xx + yy * self.arr_w].clone());
             }
             for _ in self.arr_w..new_arr_w {
-                new_cells.push(empty_cell());
+                new_cells.push(Cell::empty());
             }
         }
-        new_cells.resize(new_arr_w * new_arr_h, empty_cell());
+        new_cells.resize(new_arr_w * new_arr_h, Cell::empty());
         self.cells = new_cells;
         self.arr_w = new_arr_w;
         self.arr_h = new_arr_h;
     }
 }
 
-pub fn new_sheet() -> Spreadsheet {
-    Spreadsheet {
-        max_x: 0,
-        max_y: 0,
-        arr_w: 1,
-        arr_h: 1,
-        cells: vec![empty_cell()],
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_grow_sheet() {
+        let mut sheet = Spreadsheet::new();
+        sheet.set(0, 0, "hi".to_string());
+        sheet.set(1, 1, "hello".to_string());
+        assert_eq!(sheet.show_cell(0, 0), "hi");
+        assert_eq!(sheet.show_cell(1, 1), "hello");
     }
 }
 
 #[derive(Clone)]
-pub struct Cell {
+struct Cell {
     contents: String,
     backrefs: Vec<CellRef>,
 }
 
 impl Cell {
+    pub fn empty() -> Cell {
+        Cell {
+            contents: "".to_string(),
+            backrefs: vec![],
+        }
+    }
+
     pub fn show(&self) -> String {
         // TODO: Compute from formula.
         // OPTIMIZE: Don't clone on every show.
@@ -98,12 +116,5 @@ struct CellRef {
 impl CellRef {
     fn of(x: usize, y: usize) -> CellRef {
         CellRef { x: x, y: y }
-    }
-}
-
-pub fn empty_cell() -> Cell {
-    Cell {
-        contents: "".to_string(),
-        backrefs: vec![],
     }
 }
