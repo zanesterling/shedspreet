@@ -130,52 +130,7 @@ enum Expr {
     If(Box<Expr>, Box<Expr>, Box<Expr>),
 }
 
-#[derive(Clone)]
-struct Parsing<T>
-where
-    T: Clone,
-{
-    s: String,
-    i: usize,
-    val: Result<T, Error>,
-}
-
-impl<T: Clone> Parsing<T> {
-    fn new(s: String) -> Parsing<()> {
-        Parsing {
-            s: s,
-            i: 0,
-            val: Ok(()),
-        }
-    }
-
-    fn replace<T2: Clone>(self, val: Result<T2, Error>) -> Parsing<T2> {
-        Parsing {
-            s: self.s,
-            i: self.i,
-            val: val,
-        }
-    }
-
-    fn try_one<T2: Clone>(
-        self,
-        methods: Vec<Box<dyn Fn(&mut Parsing<T>) -> Result<T2, Error>>>,
-    ) -> Parsing<T2> {
-        for method in methods {
-            let mut p = self.clone();
-            let result = method(&mut p);
-            if result.is_ok() {
-                return p.replace(result);
-            }
-        }
-
-        let err = Error::DescriptiveError(format!(
-            "No method worked parsing at {}",
-            self.s.get(self.i..).unwrap_or("")
-        ));
-        self.replace(Err(err))
-    }
-}
+mod parsing;
 
 impl Expr {
     // TODO: Add parsing for Bool, Eq
@@ -242,9 +197,9 @@ enum Error {
 }
 
 impl From<num::ParseIntError> for Error {
-   fn from(e: num::ParseIntError) -> Error {
-       Error::DescriptiveError(e.to_string())
-   }
+    fn from(e: num::ParseIntError) -> Error {
+        Error::DescriptiveError(e.to_string())
+    }
 }
 
 impl fmt::Display for Error {
