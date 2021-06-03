@@ -2,7 +2,7 @@ mod engine;
 
 fn main() {
     let mut sheet = engine::Spreadsheet::new();
-    sheet.set(0, 0, "hi".to_string());
+    sheet.set(0, 0, "=13+2+5".to_string());
     sheet.set(1, 1, "hello".to_string());
     show_spreadsheet(&sheet);
 }

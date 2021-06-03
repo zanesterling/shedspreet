@@ -1,3 +1,4 @@
+use std::error::Error;
 use std::cmp::max;
 
 pub struct Spreadsheet {
@@ -27,7 +28,17 @@ impl Spreadsheet {
         if x < self.arr_w && y < self.arr_h {
             cell = &self.cells[x + y * self.arr_w]
         };
-        cell.show()
+
+        match cell.contents.strip_prefix("=") {
+            None => cell.contents.clone(),
+            Some(rest) => {
+                let e = Expr::parse(rest);
+                match e {
+                    Ok(expr) => expr.eval().to_string(),
+                    Err(errstr) => errstr.to_string(),
+                }
+            },
+        }
     }
 
     pub fn get_max_dims(&self) -> (usize, usize) {
@@ -99,22 +110,62 @@ impl Cell {
             backrefs: vec![],
         }
     }
-
-    pub fn show(&self) -> String {
-        // TODO: Compute from formula.
-        // OPTIMIZE: Don't clone on every show.
-        self.contents.clone()
-    }
 }
 
 #[derive(Clone)]
-struct CellRef {
-    x: usize,
-    y: usize,
+struct CellRef(usize, usize);
+
+#[derive(PartialEq, Eq, Debug)]
+enum Expr {
+    Int(i64),
+    Plus(Box<Expr>, Box<Expr>),
 }
 
-impl CellRef {
-    fn of(x: usize, y: usize) -> CellRef {
-        CellRef { x: x, y: y }
+impl Expr {
+    fn parse(s: &str) -> Result<Expr, Box<dyn Error>> {
+        match s.split_once('+') {
+            Some((x, rest)) => {
+                let x: i64 = x.parse()?;
+                let rest = Expr::parse(rest)?;
+                Ok(Expr::Plus(
+                    Box::new(Expr::Int(x)),
+                    Box::new(rest)))
+            },
+            None => {
+                let x = s.parse::<i64>()?;
+                Ok(Expr::Int(x))
+            }
+        }
+    }
+
+    fn eval(&self) -> i64 {
+        match self {
+            Expr::Int(x) => *x,
+            Expr::Plus(bx, by) => bx.eval() + by.eval(),
+        }
+    }
+}
+
+
+#[cfg(test)]
+mod expr_tests {
+    use super::*;
+
+    #[test]
+    fn test_parse() -> Result<(), Box<dyn Error>> {
+        let e = Expr::parse("13+2+5")?;
+        assert_eq!(
+            e,
+            Expr::Plus(Box::new(Expr::Int(13)),
+                       Box::new(Expr::Plus(Box::new(Expr::Int(2)),
+                                           Box::new(Expr::Int(5))))));
+        Ok(())
+    }
+
+    #[test]
+    fn test_addition() -> Result<(), Box<dyn Error>> {
+        let e = Expr::parse("13+2+5")?;
+        assert_eq!(e.eval(), 20);
+        Ok(())
     }
 }
