@@ -1,7 +1,6 @@
-use std::error;
+use std::cmp::max;
 use std::fmt;
 use std::num;
-use std::cmp::max;
 
 pub struct Spreadsheet {
     // The maximum X and Y values of filled cells in the sheet.
@@ -36,11 +35,12 @@ impl Spreadsheet {
             Some(rest) => {
                 let e = Expr::parse(rest);
                 match e {
-                    Ok(expr) => expr.eval()
+                    Ok(expr) => expr
+                        .eval()
                         .map_or_else(|e| e.to_string(), |v| v.to_string()),
                     Err(errstr) => errstr.to_string(),
                 }
-            },
+            }
         }
     }
 
@@ -87,7 +87,7 @@ impl Spreadsheet {
 }
 
 #[cfg(test)]
-mod tests {
+mod spreadsheet_tests {
     use super::*;
 
     #[test]
@@ -115,8 +115,11 @@ impl Cell {
     }
 }
 
+// TODO: Implement cross-cell expression references.
 #[derive(Clone)]
 struct CellRef(usize, usize);
+
+/***** Parsing, Expressions, Evaluation, Values. *****/
 
 #[derive(PartialEq, Eq, Debug)]
 enum Expr {
@@ -127,53 +130,92 @@ enum Expr {
     If(Box<Expr>, Box<Expr>, Box<Expr>),
 }
 
+#[derive(Clone)]
+struct Parsing<T>
+where
+    T: Clone,
+{
+    s: String,
+    i: usize,
+    val: Result<T, Error>,
+}
+
+impl<T: Clone> Parsing<T> {
+    fn new(s: String) -> Parsing<()> {
+        Parsing {
+            s: s,
+            i: 0,
+            val: Ok(()),
+        }
+    }
+
+    fn replace<T2: Clone>(self, val: Result<T2, Error>) -> Parsing<T2> {
+        Parsing {
+            s: self.s,
+            i: self.i,
+            val: val,
+        }
+    }
+
+    fn try_one<T2: Clone>(
+        self,
+        methods: Vec<Box<dyn Fn(&mut Parsing<T>) -> Result<T2, Error>>>,
+    ) -> Parsing<T2> {
+        for method in methods {
+            let mut p = self.clone();
+            let result = method(&mut p);
+            if result.is_ok() {
+                return p.replace(result);
+            }
+        }
+
+        let err = Error::DescriptiveError(format!(
+            "No method worked parsing at {}",
+            self.s.get(self.i..).unwrap_or("")
+        ));
+        self.replace(Err(err))
+    }
+}
+
 impl Expr {
     // TODO: Add parsing for Bool, Eq
     fn parse(s: &str) -> Result<Expr, Error> {
-        let result =
-            match s.split_once('+') {
-                Some((x, rest)) => {
-                    let x: i64 = x.parse()?;
-                    let rest = Expr::parse(rest)?;
-                    Ok(Expr::Plus(
-                        Box::new(Expr::Int(x)),
-                        Box::new(rest)))
-                },
-                None => {
-                    let x = s.parse::<i64>()?;
-                    Ok(Expr::Int(x))
-                }
-            };
-        result.map_err(|e| Error::ParseError(e))
+        let result = match s.split_once('+') {
+            Some((x, rest)) => {
+                let x: i64 = x.parse()?;
+                let rest = Expr::parse(rest)?;
+                Ok(Expr::Plus(Box::new(Expr::Int(x)), Box::new(rest)))
+            }
+            None => {
+                let x = s.parse::<i64>()?;
+                Ok(Expr::Int(x))
+            }
+        };
+        //result.map_err(|e| Error::ParseError(e))
+        result.map_err(|e: Error| Error::DescriptiveError(e.to_string()))
     }
 
     fn eval(&self) -> Result<Value, Error> {
         match self {
             Expr::Int(x) => Ok(Value::Int(*x)),
             Expr::Bool(b) => Ok(Value::Bool(*b)),
-            Expr::Plus(x, y) => {
-                match (x.eval()?, y.eval()?) {
-                    (Value::Int(x), Value::Int(y)) => Ok(Value::Int(x + y)),
-                    _ => Err(Error::TypeError),
-                }
+            Expr::Plus(x, y) => match (x.eval()?, y.eval()?) {
+                (Value::Int(x), Value::Int(y)) => Ok(Value::Int(x + y)),
+                _ => Err(Error::TypeError),
             },
-            Expr::Eq(x, y) => {
-                match (x.eval()?, y.eval()?) {
-                    (Value::Int(x), Value::Int(y)) => Ok(Value::Bool(x == y)),
-                    _ => Err(Error::TypeError),
-                }
-            }
-            Expr::If(b, x, y) => {
-                match b.eval()? {
-                    Value::Bool(b) => Ok(if b { x.eval()? } else { y.eval()? }),
-                    _ => Err(Error::TypeError),
-                }
-            }
+            Expr::Eq(x, y) => match (x.eval()?, y.eval()?) {
+                (Value::Int(x), Value::Int(y)) => Ok(Value::Bool(x == y)),
+                _ => Err(Error::TypeError),
+            },
+            Expr::If(b, x, y) => match b.eval()? {
+                Value::Bool(b) => Ok(if b { x.eval()? } else { y.eval()? }),
+                _ => Err(Error::TypeError),
+            },
         }
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 enum Value {
     Int(i64),
     Bool(bool),
@@ -181,24 +223,28 @@ enum Value {
 
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}",
-               match self {
-                   Value::Int(x) => x.to_string(),
-                   Value::Bool(b) => b.to_string(),
-               })
+        write!(
+            f,
+            "{}",
+            match self {
+                Value::Int(x) => x.to_string(),
+                Value::Bool(b) => b.to_string(),
+            }
+        )
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Error {
-    ParseError(Box<dyn error::Error>),
+    //ParseError(Box<dyn error::Error>),
+    DescriptiveError(String),
     TypeError,
 }
 
 impl From<num::ParseIntError> for Error {
-    fn from(e: num::ParseIntError) -> Error {
-        Error::ParseError(Box::new(e))
-    }
+   fn from(e: num::ParseIntError) -> Error {
+       Error::DescriptiveError(e.to_string())
+   }
 }
 
 impl fmt::Display for Error {
@@ -206,7 +252,6 @@ impl fmt::Display for Error {
         write!(f, "{:?}", self)
     }
 }
-
 
 #[cfg(test)]
 mod expr_tests {
@@ -217,9 +262,11 @@ mod expr_tests {
         let e = Expr::parse("13+2+5")?;
         assert_eq!(
             e,
-            Expr::Plus(Box::new(Expr::Int(13)),
-                       Box::new(Expr::Plus(Box::new(Expr::Int(2)),
-                                           Box::new(Expr::Int(5))))));
+            Expr::Plus(
+                Box::new(Expr::Int(13)),
+                Box::new(Expr::Plus(Box::new(Expr::Int(2)), Box::new(Expr::Int(5))))
+            )
+        );
         Ok(())
     }
 
@@ -232,26 +279,28 @@ mod expr_tests {
 
     #[test]
     fn test_eq() -> Result<(), Error> {
-        let e = Expr::Eq(Box::new(Expr::Int(2)),
-                         Box::new(Expr::Int(2)));
+        let e = Expr::Eq(Box::new(Expr::Int(2)), Box::new(Expr::Int(2)));
         assert_eq!(e.eval()?, Value::Bool(true));
 
-        let e = Expr::Eq(Box::new(Expr::Int(2)),
-                         Box::new(Expr::Int(3)));
+        let e = Expr::Eq(Box::new(Expr::Int(2)), Box::new(Expr::Int(3)));
         assert_eq!(e.eval()?, Value::Bool(false));
         Ok(())
     }
 
     #[test]
     fn test_if() -> Result<(), Error> {
-        let e = Expr::If(Box::new(Expr::Bool(true)),
-                         Box::new(Expr::Int(2)),
-                         Box::new(Expr::Int(3)));
+        let e = Expr::If(
+            Box::new(Expr::Bool(true)),
+            Box::new(Expr::Int(2)),
+            Box::new(Expr::Int(3)),
+        );
         assert_eq!(e.eval()?, Value::Int(2));
 
-        let e = Expr::If(Box::new(Expr::Bool(false)),
-                         Box::new(Expr::Int(2)),
-                         Box::new(Expr::Int(3)));
+        let e = Expr::If(
+            Box::new(Expr::Bool(false)),
+            Box::new(Expr::Int(2)),
+            Box::new(Expr::Int(3)),
+        );
         assert_eq!(e.eval()?, Value::Int(3));
         Ok(())
     }
