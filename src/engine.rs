@@ -147,7 +147,7 @@ impl<T: Clone> P<T> {
         ])
     }
 
-    fn plus(self) -> ParseResult<Expr> {
+    fn e_plus(self) -> ParseResult<Expr> {
         let inner: Transformer<T, Expr> = |p| {
             let p1 = p.expr()?;
             let e1 = Box::new(p1.get());
@@ -158,8 +158,24 @@ impl<T: Clone> P<T> {
         self.wrapped("(", inner, ")")
     }
 
+    fn e_eq(self) -> ParseResult<Expr> {
+        let inner: Transformer<T, Expr> = |p| {
+            let p1 = p.expr()?;
+            let e1 = Box::new(p1.get());
+            let p2 = p1.skip("=")?.expr()?;
+            let e2 = Box::new(p2.get());
+            Ok(p2.replace(Expr::Eq(e1, e2)))
+        };
+        self.wrapped("(", inner, ")")
+    }
+
     fn expr(self) -> ParseResult<Expr> {
-        self.try_one(vec![|p| p.e_int(), |p| p.e_bool(), |p| p.plus()])
+        self.try_one(vec![
+            |p| p.e_int(),
+            |p| p.e_bool(),
+            |p| p.e_plus(),
+            |p| p.e_eq(),
+        ])
     }
 }
 
@@ -239,15 +255,17 @@ impl fmt::Display for Error {
 mod expr_tests {
     use super::*;
 
+    type TR = Result<(), Error>;
+
     #[test]
-    fn test_parse_int() -> Result<(), Error> {
+    fn test_parse_int() -> TR {
         let e = Expr::parse("52")?;
         assert_eq!(e, Expr::Int(52));
         Ok(())
     }
 
     #[test]
-    fn test_parse_bool() -> Result<(), Error> {
+    fn test_parse_bool() -> TR {
         let e = Expr::parse("true")?;
         assert_eq!(e, Expr::Bool(true));
         let e = Expr::parse("false")?;
@@ -256,9 +274,8 @@ mod expr_tests {
     }
 
     #[test]
-    fn test_parse_plus_basic() -> Result<(), Error> {
-        //let e = Expr::parse("(13+2)")?;
-        let e = Parsing::new("(13+2)".to_string()).plus()?.done()?.get();
+    fn test_parse_plus_basic() -> TR {
+        let e = Expr::parse("(13+2)")?;
         assert_eq!(
             e,
             Expr::Plus(Box::new(Expr::Int(13)), Box::new(Expr::Int(2)))
@@ -267,7 +284,7 @@ mod expr_tests {
     }
 
     #[test]
-    fn test_parse_plus_nested() -> Result<(), Error> {
+    fn test_parse_plus_nested() -> TR {
         let e = Expr::parse("(13+(2+5))")?;
         assert_eq!(
             e,
@@ -280,24 +297,31 @@ mod expr_tests {
     }
 
     #[test]
-    fn test_addition() -> Result<(), Error> {
+    fn test_parse_eq() -> TR {
+        let e = Expr::parse("(1=2)")?;
+        assert_eq!(e, Expr::Eq(Box::new(Expr::Int(1)), Box::new(Expr::Int(2))));
+        Ok(())
+    }
+
+    #[test]
+    fn test_addition() -> TR {
         let e = Expr::parse("(13+(2+5))")?;
         assert_eq!(e.eval()?, Value::Int(20));
         Ok(())
     }
 
     #[test]
-    fn test_eq() -> Result<(), Error> {
-        let e = Expr::Eq(Box::new(Expr::Int(2)), Box::new(Expr::Int(2)));
+    fn test_eq() -> TR {
+        let e = Expr::parse("(2=2)")?;
         assert_eq!(e.eval()?, Value::Bool(true));
 
-        let e = Expr::Eq(Box::new(Expr::Int(2)), Box::new(Expr::Int(3)));
+        let e = Expr::parse("(2=3)")?;
         assert_eq!(e.eval()?, Value::Bool(false));
         Ok(())
     }
 
     #[test]
-    fn test_if() -> Result<(), Error> {
+    fn test_if() -> TR {
         let e = Expr::If(
             Box::new(Expr::Bool(true)),
             Box::new(Expr::Int(2)),
