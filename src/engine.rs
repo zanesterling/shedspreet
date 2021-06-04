@@ -121,7 +121,7 @@ struct CellRef(usize, usize);
 
 /***** Parsing, Expressions, Evaluation, Values. *****/
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 enum Expr {
     Int(i64),
     Bool(bool),
@@ -131,23 +131,51 @@ enum Expr {
 }
 
 mod parsing;
+use parsing::Parsing;
+
+impl<T: Clone> Parsing<T> {
+    fn e_int(self) -> Result<Parsing<Expr>, parsing::Error> {
+        let p = self.parse_int()?;
+        let e = Expr::Int(p.get());
+        Ok(p.replace(e))
+    }
+
+    fn e_bool(self) -> Result<Parsing<Expr>, parsing::Error> {
+        self.try_one(vec![
+            |p: Parsing<T>| -> Result<Parsing<Expr>, parsing::Error> {
+                Ok(p.skip("true")?.replace(Expr::Bool(true)))
+            },
+            |p: Parsing<T>| -> Result<Parsing<Expr>, parsing::Error> {
+                Ok(p.skip("false")?.replace(Expr::Bool(false)))
+            },
+        ])
+    }
+
+    fn plus(self) -> Result<Parsing<Expr>, parsing::Error> {
+        fn inner<T: Clone>(p: Parsing<T>) -> Result<Parsing<Expr>, parsing::Error> {
+            let p1 = p.expr()?;
+            let e1 = Box::new(p1.get());
+            let p2 = p1.skip("+")?.expr()?;
+            let e2 = Box::new(p2.get());
+            Ok(p2.replace(Expr::Plus(e1, e2)))
+        }
+        self.wrapped("(", inner, ")")
+    }
+
+    fn expr(self) -> Result<Parsing<Expr>, parsing::Error> {
+        self.try_one(vec![
+            |p: Parsing<T>| p.e_int(),
+            |p: Parsing<T>| p.e_bool(),
+            |p: Parsing<T>| p.plus(),
+        ])
+    }
+}
 
 impl Expr {
     // TODO: Add parsing for Bool, Eq
     fn parse(s: &str) -> Result<Expr, Error> {
-        let result = match s.split_once('+') {
-            Some((x, rest)) => {
-                let x: i64 = x.parse()?;
-                let rest = Expr::parse(rest)?;
-                Ok(Expr::Plus(Box::new(Expr::Int(x)), Box::new(rest)))
-            }
-            None => {
-                let x = s.parse::<i64>()?;
-                Ok(Expr::Int(x))
-            }
-        };
-        //result.map_err(|e| Error::ParseError(e))
-        result.map_err(|e: Error| Error::DescriptiveError(e.to_string()))
+        let p = Parsing::new(s.to_string()).expr()?.done()?;
+        Ok(p.get())
     }
 
     fn eval(&self) -> Result<Value, Error> {
@@ -196,6 +224,13 @@ enum Error {
     TypeError,
 }
 
+impl From<parsing::Error> for Error {
+    fn from(e: parsing::Error) -> Error {
+        let parsing::Error(s) = e;
+        Error::DescriptiveError(s)
+    }
+}
+
 impl From<num::ParseIntError> for Error {
     fn from(e: num::ParseIntError) -> Error {
         Error::DescriptiveError(e.to_string())
@@ -213,8 +248,35 @@ mod expr_tests {
     use super::*;
 
     #[test]
-    fn test_parse() -> Result<(), Error> {
-        let e = Expr::parse("13+2+5")?;
+    fn test_parse_int() -> Result<(), Error> {
+        let e = Expr::parse("52")?;
+        assert_eq!(e, Expr::Int(52));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_bool() -> Result<(), Error> {
+        let e = Expr::parse("true")?;
+        assert_eq!(e, Expr::Bool(true));
+        let e = Expr::parse("false")?;
+        assert_eq!(e, Expr::Bool(false));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_plus_basic() -> Result<(), Error> {
+        //let e = Expr::parse("(13+2)")?;
+        let e = Parsing::new("(13+2)".to_string()).plus()?.done()?.get();
+        assert_eq!(
+            e,
+            Expr::Plus(Box::new(Expr::Int(13)), Box::new(Expr::Int(2)))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_plus_nested() -> Result<(), Error> {
+        let e = Expr::parse("(13+(2+5))")?;
         assert_eq!(
             e,
             Expr::Plus(
@@ -227,7 +289,7 @@ mod expr_tests {
 
     #[test]
     fn test_addition() -> Result<(), Error> {
-        let e = Expr::parse("13+2+5")?;
+        let e = Expr::parse("(13+(2+5))")?;
         assert_eq!(e.eval()?, Value::Int(20));
         Ok(())
     }

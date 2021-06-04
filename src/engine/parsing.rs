@@ -14,7 +14,7 @@ use std::num;
 // TODO: Reduce number of clones used.
 
 #[derive(Clone)]
-struct Parsing<T>
+pub struct Parsing<T>
 where
     T: Clone,
 {
@@ -26,7 +26,7 @@ where
 }
 
 impl Parsing<()> {
-    fn new(s: String) -> Parsing<()> {
+    pub fn new(s: String) -> Parsing<()> {
         Parsing {
             s: s,
             i: 0,
@@ -36,7 +36,11 @@ impl Parsing<()> {
 }
 
 impl<T: Clone> Parsing<T> {
-    fn replace<T2: Clone>(self, val: T2) -> Parsing<T2> {
+    pub fn get(&self) -> T {
+        self.val.clone()
+    }
+
+    pub fn replace<T2: Clone>(self, val: T2) -> Parsing<T2> {
         Parsing {
             s: self.s.clone(),
             i: self.i,
@@ -44,9 +48,9 @@ impl<T: Clone> Parsing<T> {
         }
     }
 
-    fn try_one<T2: Clone, F: FnOnce(Parsing<T>) -> Result<Parsing<T2>, Error>>(
+    pub fn try_one<T2: Clone>(
         self,
-        methods: Vec<F>,
+        methods: Vec<fn(Parsing<T>) -> Result<Parsing<T2>, Error>>,
     ) -> Result<Parsing<T2>, Error> {
         for method in methods {
             let result = method(self.clone());
@@ -56,41 +60,66 @@ impl<T: Clone> Parsing<T> {
         }
 
         Err(Error(format!(
-            "No method worked parsing at {}",
+            "No method worked parsing at \"{}\"",
             self.s.get(self.i..).unwrap_or("")
         )))
     }
 
-    fn skip(mut self, s: &str) -> Result<Parsing<T>, Error> {
+    pub fn skip(mut self, s: &str) -> Result<Parsing<T>, Error> {
         if self.s[self.i..].starts_with(s) {
             self.i += s.len();
             Ok(self)
         } else {
-            let err = format!("Expected \"{}\" but found \"{}\" instead", s, self.s);
+            let err = format!(
+                "Expected \"{}\" but found \"{}\" instead",
+                s,
+                self.s[self.i..].to_string()
+            );
             Err(Error(err))
         }
     }
 
-    fn parse_int(mut self) -> Result<Parsing<i64>, Error> {
-        let mut int_end = self.i;
+    pub fn parse_int(mut self) -> Result<Parsing<i64>, Error> {
+        let mut int_end = 0;
         let s_rest = self.s[self.i..].as_bytes(); // TODO: Support unicode.
         while int_end < s_rest.len() && s_rest[int_end].is_ascii_digit() {
             int_end += 1;
         }
 
-        if int_end == self.i {
+        if int_end == 0 {
             let err = format!("Expected an int, instead found \"{}\"", &self.s[self.i..]);
             Err(Error(err))
         } else {
-            let x = self.s[self.i..int_end].parse::<i64>()?;
-            self.i = int_end;
+            let x = self.s[self.i..self.i + int_end].parse::<i64>()?;
+            self.i += int_end;
             Ok(self.replace(x))
         }
+    }
+
+    pub fn done(self) -> Result<Parsing<T>, Error> {
+        if self.i == self.s.len() {
+            Ok(self)
+        } else {
+            Err(Error(format!(
+                "expected end of string, instead found \"{}\"",
+                self.s[self.i..].to_string()
+            )))
+        }
+    }
+
+    pub fn wrapped<T2: Clone>(
+        self,
+        left: &str,
+        inner: fn(Parsing<T>) -> Result<Parsing<T2>, Error>,
+        right: &str,
+    ) -> Result<Parsing<T2>, Error> {
+        let p = self.skip(left)?;
+        inner(p)?.skip(right)
     }
 }
 
 #[derive(Debug, Clone)]
-struct Error(String);
+pub struct Error(pub String);
 
 impl From<num::ParseIntError> for Error {
     fn from(e: num::ParseIntError) -> Error {
@@ -122,6 +151,14 @@ mod tests {
     fn test_parse_int_respects_alpha_chars() -> Result<(), Error> {
         let p = Parsing::new("456foo".to_string()).parse_int()?;
         assert_eq!(p.val, 456);
+        assert_eq!(p.i, 3);
+        Ok(())
+    }
+
+    #[test]
+    fn test_done() -> Result<(), Error> {
+        let p = Parsing::new("123".to_string()).parse_int()?.done()?;
+        assert_eq!(p.val, 123);
         assert_eq!(p.i, 3);
         Ok(())
     }
