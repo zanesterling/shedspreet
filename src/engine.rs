@@ -131,43 +131,35 @@ enum Expr {
 }
 
 mod parsing;
-use parsing::Parsing;
+use parsing::{ParseResult, Parsing, Transformer, P};
 
-impl<T: Clone> Parsing<T> {
-    fn e_int(self) -> Result<Parsing<Expr>, parsing::Error> {
+impl<T: Clone> P<T> {
+    fn e_int(self) -> ParseResult<Expr> {
         let p = self.parse_int()?;
         let e = Expr::Int(p.get());
         Ok(p.replace(e))
     }
 
-    fn e_bool(self) -> Result<Parsing<Expr>, parsing::Error> {
+    fn e_bool(self) -> ParseResult<Expr> {
         self.try_one(vec![
-            |p: Parsing<T>| -> Result<Parsing<Expr>, parsing::Error> {
-                Ok(p.skip("true")?.replace(Expr::Bool(true)))
-            },
-            |p: Parsing<T>| -> Result<Parsing<Expr>, parsing::Error> {
-                Ok(p.skip("false")?.replace(Expr::Bool(false)))
-            },
+            |p| Ok(p.skip("true")?.replace(Expr::Bool(true))),
+            |p| Ok(p.skip("false")?.replace(Expr::Bool(false))),
         ])
     }
 
-    fn plus(self) -> Result<Parsing<Expr>, parsing::Error> {
-        fn inner<T: Clone>(p: Parsing<T>) -> Result<Parsing<Expr>, parsing::Error> {
+    fn plus(self) -> ParseResult<Expr> {
+        let inner: Transformer<T, Expr> = |p| {
             let p1 = p.expr()?;
             let e1 = Box::new(p1.get());
             let p2 = p1.skip("+")?.expr()?;
             let e2 = Box::new(p2.get());
             Ok(p2.replace(Expr::Plus(e1, e2)))
-        }
+        };
         self.wrapped("(", inner, ")")
     }
 
-    fn expr(self) -> Result<Parsing<Expr>, parsing::Error> {
-        self.try_one(vec![
-            |p: Parsing<T>| p.e_int(),
-            |p: Parsing<T>| p.e_bool(),
-            |p: Parsing<T>| p.plus(),
-        ])
+    fn expr(self) -> ParseResult<Expr> {
+        self.try_one(vec![|p| p.e_int(), |p| p.e_bool(), |p| p.plus()])
     }
 }
 

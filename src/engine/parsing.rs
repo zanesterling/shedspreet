@@ -25,6 +25,10 @@ where
     val: T,
 }
 
+pub type P<T> = Parsing<T>;
+pub type ParseResult<T> = Result<Parsing<T>, Error>;
+pub type Transformer<T1, T2> = fn(Parsing<T1>) -> ParseResult<T2>;
+
 impl Parsing<()> {
     pub fn new(s: String) -> Parsing<()> {
         Parsing {
@@ -48,10 +52,7 @@ impl<T: Clone> Parsing<T> {
         }
     }
 
-    pub fn try_one<T2: Clone>(
-        self,
-        methods: Vec<fn(Parsing<T>) -> Result<Parsing<T2>, Error>>,
-    ) -> Result<Parsing<T2>, Error> {
+    pub fn try_one<T2: Clone>(self, methods: Vec<Transformer<T, T2>>) -> ParseResult<T2> {
         for method in methods {
             let result = method(self.clone());
             if result.is_ok() {
@@ -65,7 +66,7 @@ impl<T: Clone> Parsing<T> {
         )))
     }
 
-    pub fn skip(mut self, s: &str) -> Result<Parsing<T>, Error> {
+    pub fn skip(mut self, s: &str) -> ParseResult<T> {
         if self.s[self.i..].starts_with(s) {
             self.i += s.len();
             Ok(self)
@@ -79,7 +80,7 @@ impl<T: Clone> Parsing<T> {
         }
     }
 
-    pub fn parse_int(mut self) -> Result<Parsing<i64>, Error> {
+    pub fn parse_int(mut self) -> ParseResult<i64> {
         let mut int_end = 0;
         let s_rest = self.s[self.i..].as_bytes(); // TODO: Support unicode.
         while int_end < s_rest.len() && s_rest[int_end].is_ascii_digit() {
@@ -96,7 +97,7 @@ impl<T: Clone> Parsing<T> {
         }
     }
 
-    pub fn done(self) -> Result<Parsing<T>, Error> {
+    pub fn done(self) -> ParseResult<T> {
         if self.i == self.s.len() {
             Ok(self)
         } else {
@@ -110,9 +111,9 @@ impl<T: Clone> Parsing<T> {
     pub fn wrapped<T2: Clone>(
         self,
         left: &str,
-        inner: fn(Parsing<T>) -> Result<Parsing<T2>, Error>,
+        inner: Transformer<T, T2>,
         right: &str,
-    ) -> Result<Parsing<T2>, Error> {
+    ) -> ParseResult<T2> {
         let p = self.skip(left)?;
         inner(p)?.skip(right)
     }
