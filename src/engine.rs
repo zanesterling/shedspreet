@@ -169,12 +169,26 @@ impl<T: Clone> P<T> {
         self.wrapped("(", inner, ")")
     }
 
+    fn e_if(self) -> ParseResult<Expr> {
+        let args: Transformer<T, Expr> = |p| {
+            let p = p.expr()?;
+            let a1 = p.get();
+            let p = p.skip(",")?.expr()?;
+            let a2 = p.get();
+            let p = p.skip(",")?.expr()?;
+            let a3 = p.get();
+            Ok(p.replace(Expr::If(Box::new(a1), Box::new(a2), Box::new(a3))))
+        };
+        self.skip("if")?.wrapped("(", args, ")")
+    }
+
     fn expr(self) -> ParseResult<Expr> {
         self.try_one(vec![
             |p| p.e_int(),
             |p| p.e_bool(),
             |p| p.e_plus(),
             |p| p.e_eq(),
+            |p| p.e_if(),
         ])
     }
 }
@@ -304,6 +318,20 @@ mod expr_tests {
     }
 
     #[test]
+    fn test_parse_if() -> TR {
+        let e = Expr::parse("if(true,1,2)")?;
+        assert_eq!(
+            e,
+            Expr::If(
+                Box::new(Expr::Bool(true)),
+                Box::new(Expr::Int(1)),
+                Box::new(Expr::Int(2))
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
     fn test_addition() -> TR {
         let e = Expr::parse("(13+(2+5))")?;
         assert_eq!(e.eval()?, Value::Int(20));
@@ -321,19 +349,35 @@ mod expr_tests {
     }
 
     #[test]
-    fn test_if() -> TR {
-        let e = Expr::If(
-            Box::new(Expr::Bool(true)),
-            Box::new(Expr::Int(2)),
-            Box::new(Expr::Int(3)),
-        );
+    fn test_eq_bad() -> TR {
+        let e = Expr::parse("(2=false)")?;
+        assert!(e.eval().is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_if_basic() -> TR {
+        let e = Expr::parse("if(true,2,3)")?;
         assert_eq!(e.eval()?, Value::Int(2));
 
-        let e = Expr::If(
-            Box::new(Expr::Bool(false)),
-            Box::new(Expr::Int(2)),
-            Box::new(Expr::Int(3)),
-        );
+        let e = Expr::parse("if(false,2,3)")?;
+        assert_eq!(e.eval()?, Value::Int(3));
+        Ok(())
+    }
+
+    #[test]
+    fn test_if_ignores_other() -> TR {
+        let e = Expr::parse("if(true,7,(2=false))")?;
+        assert_eq!(e.eval()?, Value::Int(7));
+
+        let e = Expr::parse("if(false,(2=false),7)")?;
+        assert_eq!(e.eval()?, Value::Int(7));
+        Ok(())
+    }
+
+    #[test]
+    fn test_if_nested() -> TR {
+        let e = Expr::parse("if(if(true,false,true),75,if(false,true,(1+2)))")?;
         assert_eq!(e.eval()?, Value::Int(3));
         Ok(())
     }
