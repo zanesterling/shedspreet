@@ -1,4 +1,6 @@
+use maplit::*;
 use std::cmp::max;
+use std::collections::HashMap;
 use std::fmt;
 use std::num;
 
@@ -238,12 +240,25 @@ impl Expr {
                 Value::Bool(b) => Ok(if b { x.eval()? } else { y.eval()? }),
                 _ => Err(Error::TypeError),
             },
-            Expr::FnCall(_, _) => Err(Error::DescriptiveError(
-                "FnCall eval not implemented".to_string(),
-            )),
+            Expr::FnCall(name, args) => match BUILT_INS.get(name) {
+                None => Err(Error::DescriptiveError(format!(
+                    "function \"{}\" does not exist",
+                    name
+                ))),
+                Some(f) => {
+                    let vals: Result<Vec<Value>, Error> = args.iter().map(Expr::eval).collect();
+                    Ok(f(vals?))
+                }
+            },
         }
     }
 }
+
+type BuiltIn = fn(Vec<Value>) -> Value;
+use lazy_static::lazy_static;
+lazy_static!(
+    static ref BUILT_INS: HashMap<String, BuiltIn> = hashmap! {};
+);
 
 #[derive(Debug, PartialEq, Clone)]
 enum Value {
