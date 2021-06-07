@@ -80,21 +80,10 @@ impl<T: Clone> Parsing<T> {
         }
     }
 
-    pub fn parse_int(mut self) -> ParseResult<i64> {
-        let mut int_end = 0;
-        let s_rest = self.s[self.i..].as_bytes(); // TODO: Support unicode.
-        while int_end < s_rest.len() && s_rest[int_end].is_ascii_digit() {
-            int_end += 1;
-        }
-
-        if int_end == 0 {
-            let err = format!("Expected an int, instead found \"{}\"", &self.s[self.i..]);
-            Err(Error(err))
-        } else {
-            let x = self.s[self.i..self.i + int_end].parse::<i64>()?;
-            self.i += int_end;
-            Ok(self.replace(x))
-        }
+    pub fn parse_int(self) -> ParseResult<i64> {
+        let p = self.match_pred(u8::is_ascii_digit, "is_ascii_digit")?;
+        let x = p.get().parse::<i64>()?;
+        Ok(p.replace(x))
     }
 
     pub fn done(self) -> ParseResult<T> {
@@ -117,6 +106,59 @@ impl<T: Clone> Parsing<T> {
         let p = self.skip(left)?;
         inner(p)?.skip(right)
     }
+
+    pub fn match_pred(mut self, pred: fn(&u8) -> bool, pred_name: &str) -> ParseResult<String> {
+        let mut offset = 0;
+        let rest_bytes = &self.s.as_bytes()[self.i..];
+        for c in rest_bytes {
+            if !pred(c) {
+                break;
+            }
+            offset += 1;
+        }
+
+        if offset == 0 {
+            let err = format!(
+                "Expected bytes matching \"{}\", but got \"{}\"",
+                pred_name,
+                &self.s[self.i..],
+            );
+            return Err(Error(err));
+        }
+
+        let word = String::from_utf8(rest_bytes[..offset].to_vec())?;
+        self.i += offset;
+        Ok(self.replace(word))
+    }
+
+    // One or more repetitions of `once`.
+    pub fn repeat<T2: Clone>(self, once: Transformer<(), T2>) -> ParseResult<Vec<T2>> {
+        let mut p = self.drop();
+        let mut xs = Vec::new();
+        loop {
+            // This is really slow right now because we would copy `self.s`.
+            // Fix is to change `self.s` to a `&str`.
+            let pp = once(p.clone());
+            match pp {
+                Ok(pp) => {
+                    xs.push(pp.get());
+                    p = pp.drop();
+                }
+                Err(e) => {
+                    if xs.is_empty() {
+                        return Err(e);
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+        Ok(p.replace(xs))
+    }
+
+    pub fn drop(self) -> Parsing<()> {
+        self.replace(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -128,12 +170,20 @@ impl From<num::ParseIntError> for Error {
     }
 }
 
+impl From<std::string::FromUtf8Error> for Error {
+    fn from(e: std::string::FromUtf8Error) -> Error {
+        Error(e.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    type TR = Result<(), Error>;
+
     #[test]
-    fn test_skip() -> Result<(), Error> {
+    fn test_skip() -> TR {
         let p = Parsing::new("foo".to_string()).skip("fo")?;
         assert_eq!(p.i, 2);
         assert_eq!(p.s, "foo");
@@ -141,7 +191,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_int_respects_end_of_string() -> Result<(), Error> {
+    fn test_parse_int_respects_end_of_string() -> TR {
         let p = Parsing::new("123".to_string()).parse_int()?;
         assert_eq!(p.val, 123);
         assert_eq!(p.i, 3);
@@ -149,7 +199,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_int_respects_alpha_chars() -> Result<(), Error> {
+    fn test_parse_int_respects_alpha_chars() -> TR {
         let p = Parsing::new("456foo".to_string()).parse_int()?;
         assert_eq!(p.val, 456);
         assert_eq!(p.i, 3);
@@ -157,10 +207,36 @@ mod tests {
     }
 
     #[test]
-    fn test_done() -> Result<(), Error> {
+    fn test_done() -> TR {
         let p = Parsing::new("123".to_string()).parse_int()?.done()?;
         assert_eq!(p.val, 123);
         assert_eq!(p.i, 3);
         Ok(())
     }
+
+    #[test]
+    fn test_match_pred() -> TR {
+        let p = Parsing::new("abcdf".to_string())
+            .match_pred(|c| (*c as char) < 'd', "c < 'd'")?;
+        assert_eq!(p.val, "abc");
+        Ok(())
+    }
+
+    #[test]
+    fn test_repeat() -> TR {
+        let p = Parsing::new("a, a, b, c".to_string()).repeat(|p| p.skip("a, "))?;
+        assert_eq!(p.val.len(), 2);
+        assert_eq!(p.i, 6);
+        Ok(())
+    }
+
+    /* Model test:
+
+    #[test]
+    fn test_name() -> TR {
+        let p = Parsing::new("".to_string())?;
+        Ok(())
+    }
+
+    */
 }

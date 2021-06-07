@@ -128,11 +128,13 @@ enum Expr {
     Plus(Box<Expr>, Box<Expr>),
     Eq(Box<Expr>, Box<Expr>),
     If(Box<Expr>, Box<Expr>, Box<Expr>),
+    FnCall(String, Vec<Expr>),
 }
 
 mod parsing;
 use parsing::{ParseResult, Parsing, Transformer, P};
 
+// TODO: Skip unimportant whitespace. Maybe by adding a tokenizer?
 impl<T: Clone> P<T> {
     fn e_int(self) -> ParseResult<Expr> {
         let p = self.parse_int()?;
@@ -182,6 +184,25 @@ impl<T: Clone> P<T> {
         self.skip("if")?.wrapped("(", args, ")")
     }
 
+    fn e_fn_call(self) -> ParseResult<Expr> {
+        let p = self.match_pred(u8::is_ascii_alphanumeric, "is_ascii_alphanumeric")?;
+        let name: String = p.get();
+
+        fn parse_args<T1: Clone>(p: Parsing<T1>) -> ParseResult<Vec<Expr>> {
+            fn arg_then_comma(p: Parsing<()>) -> ParseResult<Expr> {
+                p.expr()?.skip(",")
+            }
+            let p = p.repeat(arg_then_comma)?;
+            let mut args: Vec<Expr> = p.get();
+            let p = p.expr()?;
+            args.push(p.get());
+            Ok(p.replace(args))
+        }
+        let p = p.wrapped("(", parse_args, ")")?;
+        let args = p.get();
+        Ok(p.replace(Expr::FnCall(name, args)))
+    }
+
     fn expr(self) -> ParseResult<Expr> {
         self.try_one(vec![
             |p| p.e_int(),
@@ -189,6 +210,7 @@ impl<T: Clone> P<T> {
             |p| p.e_plus(),
             |p| p.e_eq(),
             |p| p.e_if(),
+            |p| p.e_fn_call(),
         ])
     }
 }
@@ -216,6 +238,9 @@ impl Expr {
                 Value::Bool(b) => Ok(if b { x.eval()? } else { y.eval()? }),
                 _ => Err(Error::TypeError),
             },
+            Expr::FnCall(_, _) => Err(Error::DescriptiveError(
+                "FnCall eval not implemented".to_string(),
+            )),
         }
     }
 }
@@ -305,6 +330,19 @@ mod expr_tests {
             Expr::Plus(
                 Box::new(Expr::Int(13)),
                 Box::new(Expr::Plus(Box::new(Expr::Int(2)), Box::new(Expr::Int(5))))
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_fn_call() -> TR {
+        let e = Expr::parse("foo(1,false,5)")?;
+        assert_eq!(
+            e,
+            Expr::FnCall(
+                "foo".to_string(),
+                vec![Expr::Int(1), Expr::Bool(false), Expr::Int(5)]
             )
         );
         Ok(())
