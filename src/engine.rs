@@ -218,7 +218,6 @@ impl<T: Clone> P<T> {
 }
 
 impl Expr {
-    // TODO: Add parsing for Bool, Eq
     fn parse(s: &str) -> Result<Expr, Error> {
         let p = Parsing::new(s.to_string()).expr()?.done()?;
         Ok(p.get())
@@ -280,7 +279,7 @@ impl fmt::Display for Value {
 }
 
 #[derive(Debug, Clone)]
-enum Error {
+pub enum Error {
     //ParseError(Box<dyn error::Error>),
     DescriptiveError(String),
     TypeError,
