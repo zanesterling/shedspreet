@@ -142,6 +142,42 @@ enum Expr {
     FnCall(String, Vec<Expr>),
 }
 
+impl Expr {
+    fn parse(s: &str) -> Result<Expr, Error> {
+        let p = Parsing::new(s.to_string()).expr()?.done()?;
+        Ok(p.get())
+    }
+
+    fn eval(&self) -> Result<Value, Error> {
+        match self {
+            Expr::Int(x) => Ok(Value::Int(*x)),
+            Expr::Bool(b) => Ok(Value::Bool(*b)),
+            Expr::Plus(x, y) => match (x.eval()?, y.eval()?) {
+                (Value::Int(x), Value::Int(y)) => Ok(Value::Int(x + y)),
+                _ => Err(Error::TypeError),
+            },
+            Expr::Eq(x, y) => match (x.eval()?, y.eval()?) {
+                (Value::Int(x), Value::Int(y)) => Ok(Value::Bool(x == y)),
+                _ => Err(Error::TypeError),
+            },
+            Expr::If(b, x, y) => match b.eval()? {
+                Value::Bool(b) => Ok(if b { x.eval()? } else { y.eval()? }),
+                _ => Err(Error::TypeError),
+            },
+            Expr::FnCall(name, args) => match BUILT_INS.get(name) {
+                None => Err(Error::DescriptiveError(format!(
+                    "function \"{}\" does not exist",
+                    name
+                ))),
+                Some(f) => {
+                    let vals: Result<Vec<Value>, Error> = args.iter().map(Expr::eval).collect();
+                    Ok(f(vals?))
+                }
+            },
+        }
+    }
+}
+
 mod parsing;
 use parsing::{ParseResult, Parsing, Transformer, P};
 
@@ -223,42 +259,6 @@ impl<T: Clone> P<T> {
             |p| p.e_if(),
             |p| p.e_fn_call(),
         ])
-    }
-}
-
-impl Expr {
-    fn parse(s: &str) -> Result<Expr, Error> {
-        let p = Parsing::new(s.to_string()).expr()?.done()?;
-        Ok(p.get())
-    }
-
-    fn eval(&self) -> Result<Value, Error> {
-        match self {
-            Expr::Int(x) => Ok(Value::Int(*x)),
-            Expr::Bool(b) => Ok(Value::Bool(*b)),
-            Expr::Plus(x, y) => match (x.eval()?, y.eval()?) {
-                (Value::Int(x), Value::Int(y)) => Ok(Value::Int(x + y)),
-                _ => Err(Error::TypeError),
-            },
-            Expr::Eq(x, y) => match (x.eval()?, y.eval()?) {
-                (Value::Int(x), Value::Int(y)) => Ok(Value::Bool(x == y)),
-                _ => Err(Error::TypeError),
-            },
-            Expr::If(b, x, y) => match b.eval()? {
-                Value::Bool(b) => Ok(if b { x.eval()? } else { y.eval()? }),
-                _ => Err(Error::TypeError),
-            },
-            Expr::FnCall(name, args) => match BUILT_INS.get(name) {
-                None => Err(Error::DescriptiveError(format!(
-                    "function \"{}\" does not exist",
-                    name
-                ))),
-                Some(f) => {
-                    let vals: Result<Vec<Value>, Error> = args.iter().map(Expr::eval).collect();
-                    Ok(f(vals?))
-                }
-            },
-        }
     }
 }
 
