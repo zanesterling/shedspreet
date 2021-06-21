@@ -44,6 +44,15 @@ fn run_line(line: &String, sheet: &mut engine::Spreadsheet) -> Result<(), engine
             }
             _ => println!("expected \"set col row val\", got: \"{}\"", rest),
         },
+        "info" => match rest.splitn(2, ' ').collect::<Vec<_>>().as_slice() {
+            [col, row] => {
+                let col = col.parse::<usize>()?;
+                let row = row.parse::<usize>()?;
+                let contents = sheet.raw_cell(col, row);
+                println!("cell {}:{} has contents: {}", col, row, contents);
+            }
+            _ => println!("expected \"info col row\", got: \"{}\"", rest),
+        },
         _ => println!("command not recognized: \"{}\"", cmd),
     }
     Ok(())

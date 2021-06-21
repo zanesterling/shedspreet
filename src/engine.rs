@@ -26,6 +26,15 @@ impl Spreadsheet {
         }
     }
 
+    pub fn raw_cell(&self, x: usize, y: usize) -> String {
+        let mut cell = &Cell::empty();
+        if x < self.arr_w && y < self.arr_h {
+            cell = &self.cells[x + y * self.arr_w]
+        };
+
+        cell.contents.clone()
+    }
+
     pub fn show_cell(&self, x: usize, y: usize) -> String {
         let mut cell = &Cell::empty();
         if x < self.arr_w && y < self.arr_h {
