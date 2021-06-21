@@ -47,11 +47,23 @@ impl Spreadsheet {
                 let e = Expr::parse(rest);
                 match e {
                     Ok(expr) => expr
-                        .eval()
+                        .eval(&self)
                         .map_or_else(|e| e.to_string(), |v| v.to_string()),
                     Err(errstr) => errstr.to_string(),
                 }
             }
+        }
+    }
+
+    fn get_expr(&self, x: usize, y: usize) -> Result<Expr, Error> {
+        let mut cell = &Cell::empty();
+        if x < self.arr_w && y < self.arr_h {
+            cell = &self.cells[x + y * self.arr_w]
+        };
+
+        match cell.contents.strip_prefix("=") {
+            None => Ok(Expr::String(cell.contents.clone())),
+            Some(rest) => Expr::parse(rest),
         }
     }
 
@@ -136,10 +148,13 @@ struct CellRef(usize, usize);
 enum Expr {
     Int(i64),
     Bool(bool),
+    String(String),
+
     Plus(Box<Expr>, Box<Expr>),
     Eq(Box<Expr>, Box<Expr>),
     If(Box<Expr>, Box<Expr>, Box<Expr>),
     FnCall(String, Vec<Expr>),
+    CellRef(usize, usize),
 }
 
 impl Expr {
@@ -148,20 +163,22 @@ impl Expr {
         Ok(p.get())
     }
 
-    fn eval(&self) -> Result<Value, Error> {
+    fn eval(&self, sheet: &Spreadsheet) -> Result<Value, Error> {
         match self {
             Expr::Int(x) => Ok(Value::Int(*x)),
             Expr::Bool(b) => Ok(Value::Bool(*b)),
-            Expr::Plus(x, y) => match (x.eval()?, y.eval()?) {
+            Expr::String(s) => Ok(Value::String(s.clone())),
+
+            Expr::Plus(x, y) => match (x.eval(sheet)?, y.eval(sheet)?) {
                 (Value::Int(x), Value::Int(y)) => Ok(Value::Int(x + y)),
                 _ => Err(Error::TypeError),
             },
-            Expr::Eq(x, y) => match (x.eval()?, y.eval()?) {
+            Expr::Eq(x, y) => match (x.eval(sheet)?, y.eval(sheet)?) {
                 (Value::Int(x), Value::Int(y)) => Ok(Value::Bool(x == y)),
                 _ => Err(Error::TypeError),
             },
-            Expr::If(b, x, y) => match b.eval()? {
-                Value::Bool(b) => Ok(if b { x.eval()? } else { y.eval()? }),
+            Expr::If(b, x, y) => match b.eval(sheet)? {
+                Value::Bool(b) => Ok(if b { x.eval(sheet)? } else { y.eval(sheet)? }),
                 _ => Err(Error::TypeError),
             },
             Expr::FnCall(name, args) => match BUILT_INS.get(name) {
@@ -170,10 +187,12 @@ impl Expr {
                     name
                 ))),
                 Some(f) => {
-                    let vals: Result<Vec<Value>, Error> = args.iter().map(Expr::eval).collect();
+                    let vals: Result<Vec<Value>, Error> =
+                        args.iter().map(|x| x.eval(sheet)).collect();
                     Ok(f(vals?))
                 }
             },
+            Expr::CellRef(x, y) => sheet.get_expr(*x, *y)?.eval(sheet),
         }
     }
 }
@@ -231,6 +250,17 @@ impl<T: Clone> P<T> {
         self.skip("if")?.wrapped("(", args, ")")
     }
 
+    fn e_cell_ref(self) -> ParseResult<Expr> {
+        let args: Transformer<T, Expr> = |p| {
+            let p = p.parse_int()?;
+            let a1 = p.get() as usize;
+            let p = p.skip(",")?.parse_int()?;
+            let a2 = p.get() as usize;
+            Ok(p.replace(Expr::CellRef(a1, a2)))
+        };
+        self.skip("Ref")?.wrapped("(", args, ")")
+    }
+
     fn e_fn_call(self) -> ParseResult<Expr> {
         let p = self.match_pred(u8::is_ascii_alphanumeric, "is_ascii_alphanumeric")?;
         let name: String = p.get();
@@ -257,6 +287,7 @@ impl<T: Clone> P<T> {
             |p| p.e_plus(),
             |p| p.e_eq(),
             |p| p.e_if(),
+            |p| p.e_cell_ref(),
             |p| p.e_fn_call(),
         ])
     }
@@ -264,14 +295,15 @@ impl<T: Clone> P<T> {
 
 type BuiltIn = fn(Vec<Value>) -> Value;
 use lazy_static::lazy_static;
-lazy_static!(
+lazy_static! {
     static ref BUILT_INS: HashMap<String, BuiltIn> = hashmap! {};
-);
+}
 
 #[derive(Debug, PartialEq, Clone)]
 enum Value {
     Int(i64),
     Bool(bool),
+    String(String),
 }
 
 impl fmt::Display for Value {
@@ -282,6 +314,7 @@ impl fmt::Display for Value {
             match self {
                 Value::Int(x) => x.to_string(),
                 Value::Bool(b) => b.to_string(),
+                Value::String(s) => format!("\"{}\"", s),
             }
         )
     }
@@ -394,52 +427,58 @@ mod expr_tests {
 
     #[test]
     fn test_addition() -> TR {
+        let s = Spreadsheet::new();
         let e = Expr::parse("(13+(2+5))")?;
-        assert_eq!(e.eval()?, Value::Int(20));
+        assert_eq!(e.eval(&s)?, Value::Int(20));
         Ok(())
     }
 
     #[test]
     fn test_eq() -> TR {
+        let s = Spreadsheet::new();
         let e = Expr::parse("(2=2)")?;
-        assert_eq!(e.eval()?, Value::Bool(true));
+        assert_eq!(e.eval(&s)?, Value::Bool(true));
 
         let e = Expr::parse("(2=3)")?;
-        assert_eq!(e.eval()?, Value::Bool(false));
+        assert_eq!(e.eval(&s)?, Value::Bool(false));
         Ok(())
     }
 
     #[test]
     fn test_eq_bad() -> TR {
+        let s = Spreadsheet::new();
         let e = Expr::parse("(2=false)")?;
-        assert!(e.eval().is_err());
+        assert!(e.eval(&s).is_err());
         Ok(())
     }
 
     #[test]
     fn test_if_basic() -> TR {
+        let s = Spreadsheet::new();
         let e = Expr::parse("if(true,2,3)")?;
-        assert_eq!(e.eval()?, Value::Int(2));
+        assert_eq!(e.eval(&s)?, Value::Int(2));
 
         let e = Expr::parse("if(false,2,3)")?;
-        assert_eq!(e.eval()?, Value::Int(3));
+        assert_eq!(e.eval(&s)?, Value::Int(3));
         Ok(())
     }
 
     #[test]
     fn test_if_ignores_other() -> TR {
+        let s = Spreadsheet::new();
         let e = Expr::parse("if(true,7,(2=false))")?;
-        assert_eq!(e.eval()?, Value::Int(7));
+        assert_eq!(e.eval(&s)?, Value::Int(7));
 
         let e = Expr::parse("if(false,(2=false),7)")?;
-        assert_eq!(e.eval()?, Value::Int(7));
+        assert_eq!(e.eval(&s)?, Value::Int(7));
         Ok(())
     }
 
     #[test]
     fn test_if_nested() -> TR {
+        let s = Spreadsheet::new();
         let e = Expr::parse("if(if(true,false,true),75,if(false,true,(1+2)))")?;
-        assert_eq!(e.eval()?, Value::Int(3));
+        assert_eq!(e.eval(&s)?, Value::Int(3));
         Ok(())
     }
 }
